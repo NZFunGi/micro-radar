@@ -8,8 +8,10 @@
   <img src="https://github.com/user-attachments/assets/2ccb2063-d15c-4180-8e3c-ae3a81c814ff" alt="drawing" width="400"/>
 </p>
 <p align=center>
-  <a href="#prerequisites">PREREQUISITES</a> - <a href="#assembly">ASSEMBLY</a> - <a href="#usage">USAGE</a> - <a href="#faq">FAQ</a>
+  <a href="#prerequisites">PREREQUISITES</a> - <a href="#assembly">ASSEMBLY</a> - <a href="#usage">USAGE</a> - <a href="#fork-features">FORK FEATURES</a> - <a href="#faq">FAQ</a>
 </p>
+
+> This is a fork of [AnthonySturdy/micro-radar](https://github.com/AnthonySturdy/micro-radar) with some extra features added - a real coastline overlay, category-colored aircraft, flight route info, and a [companion desktop app](https://github.com/NZFunGi/micro-radar-companion) for configuring it all without a firmware rebuild. See [Fork Features](#fork-features) below for details. Everything in this README up to that section is the original project - assembly, wiring, and base firmware are unchanged.
 
 ## Prerequisites
 
@@ -188,6 +190,57 @@ That's it! Once you've configured everything, you should see a live view of all 
 
 <img width="400" alt="IMG_7935" src="https://github.com/user-attachments/assets/118b9a1c-c2c0-488d-b638-d8684a30b1d7" />
 
+## Fork Features
+
+This fork adds a few things on top of the original project:
+
+### Coastline overlay
+
+The radar background renders real land/sea data instead of a plain black screen, using coastline data from OpenStreetMap. One location's worth of data is baked into the firmware as a fallback (`include/EmbeddedCoastline.h`), but the real way to get accurate coastline for *your* location is the [companion app](#companion-app) below, which fetches and pushes fresh data for wherever you've configured the radar.
+
+<p align="center">
+  <img src="docs/coastline-example.png" alt="Coastline overlay example" width="320"/>
+</p>
+
+Sea and land colors (along with every other color on screen) are configurable at runtime - see the companion app.
+
+### Category-colored aircraft
+
+Aircraft are colored by their OpenSky emitter category (light, large, heavy, rotorcraft, glider, or unknown) instead of a single fixed color, making it easier to tell traffic types apart at a glance.
+
+### Flight number & route info
+
+Each aircraft label shows its flight number, and - once resolved - its origin and destination airport (`O: <code>` / `D: <code>`), looked up via OpenSky's routes API. Route lookups are throttled to share the same daily request budget as position polling, so newly-appeared aircraft can take a little while to show a route the first time; already-seen callsigns are cached for the rest of the session.
+
+### Range shown in km
+
+The current radar range is displayed at the top of the screen (e.g. "Range = 100km"), and both the on-device web config page and the companion app show/accept range in km rather than degrees.
+
+### Companion app
+
+A Windows desktop app - [NZFunGi/micro-radar-companion](https://github.com/NZFunGi/micro-radar-companion) - talks to the device over the same USB connection used for flashing, letting you:
+
+- Pick colors live (native color picker or type a hex code) - applies instantly, no restart
+- Edit location and range (in km)
+- Regenerate the coastline overlay for any location/range by fetching real OpenStreetMap data, classifying land vs sea, and pushing it to the device - no firmware rebuild needed
+
+<p align="center">
+  <img src="docs/companion-app-screenshot.png" alt="Companion app screenshot" width="420"/>
+</p>
+
+See that repo's README for setup and usage instructions.
+
+### Bigger NVS partition
+
+The color palette, coastline data, and configuration all live in the device's NVS (flash-backed key/value storage), and a coastline push alone can be several KB - more than fits in the default 20KB NVS partition once you count everything else stored there. This fork uses a custom partition table (`partitions_custom.csv`, 256KB of NVS) instead of the original `huge_app.csv` default. If you're flashing a device that's never run this fork's firmware before, do a full chip erase first so the new partition table takes effect cleanly:
+
+```
+pio run --target erase --upload-port <your COM port>
+pio run --target upload --upload-port <your COM port>
+```
+
+**Note:** a full chip erase wipes WiFi credentials, OpenSky API keys, and all saved settings - you'll go through the `MicroRadar-Setup` WiFi portal again afterward, same as first boot.
+
 ## FAQ
 
 > the port is busy or doesn't exist
@@ -217,6 +270,28 @@ This appears to be a Windows-specific issue. Either of these should fix it:
 1. Open a new terminal in VS Code (Terminal → New Terminal)
 2. Run `python -m pip install intelhex`
 3. Rebuild
+<br/><br/>
+
+> The coastline overlay looks blank, or shows the wrong shape for my location
+
+The firmware only has one location's coastline data pre-baked in (see [Fork Features](#fork-features)). For anywhere else, use the [companion app](https://github.com/NZFunGi/micro-radar-companion)'s **Apply & Regenerate Coastline** button to fetch and push real data for your actual configured location and range.
+<br/><br/>
+
+> Route info (`O:` / `D:`) never shows up for some aircraft, just the flight number
+
+This is usually expected, not a bug - route lookups are throttled to share the same daily OpenSky request budget as position polling (roughly one new lookup every couple of minutes if you're authenticated, longer if not), and every device reboot resets the lookup queue and cache. Give it a few minutes of uninterrupted uptime; already-resolved callsigns stay cached for the rest of the session. Some aircraft genuinely have no route on file at OpenSky, in which case it'll never resolve.
+<br/><br/>
+
+> I flashed this fork over an existing install and now nothing works / the device won't boot properly
+
+This fork uses a bigger NVS partition than the original (see [Fork Features](#fork-features)), which requires a full chip erase to take effect cleanly on a device that's run different firmware before:
+
+```
+pio run --target erase --upload-port <your COM port>
+pio run --target upload --upload-port <your COM port>
+```
+
+This wipes WiFi credentials and all saved settings, so you'll need to go through the `MicroRadar-Setup` WiFi portal again afterward.
 
 ## Notes
 
@@ -225,3 +300,7 @@ This appears to be a Windows-specific issue. Either of these should fix it:
 > Inspired by [therealhacksaw](https://www.instagram.com/therealhacksaw/)'s desk radar
 
 > Built with ♥︎ in London
+
+---
+
+> This fork's additions (coastline overlay, category colors, route info, companion app) built with Claude Code
