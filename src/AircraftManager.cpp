@@ -1,4 +1,9 @@
 #include "AircraftManager.h"
+#include "Projection.h"
+#include "OpenSkyBudget.h"
+#include "CategoryColors.h"
+#include "ColorUtils.h"
+#include "CoastlineManager.h"
 
 constexpr int SCREEN_SIZE = 240;
 constexpr int SCREEN_SIZE_DIV_2 = (SCREEN_SIZE / 2);
@@ -18,18 +23,12 @@ void AircraftManager::Initialise()
     if (!renderText.isEmpty()) displayInfoText = renderText == "true" ? true : false;
     if (!renderTris.isEmpty()) displayTriangles = renderTris == "true" ? true : false;
 
-    // calculate how often we can call OpenSky API before being rate limited
-    constexpr int MS_PER_DAY = 24 * 60 * 60 * 1000;
-    constexpr int ANONYMOUS_TOKENS_PER_DAY = 400;
-    constexpr int AUTHED_TOKENS_PER_DAY = 4000;
-    constexpr int TOKEN_BUFFER = 3;
-    int dailyRequestBudget = ANONYMOUS_TOKENS_PER_DAY - TOKEN_BUFFER; // non-authed tokens minus buffer
-
+    // calculate how often we can call OpenSky /states/all before being rate limited,
+    // reserving a share of the daily quota for RouteLookupManager's /api/routes calls
     const String token = authHandler.GetValidToken(configServer.GetStoredString("opensky-id"), configServer.GetStoredString("opensky-secret"));
-    if (!token.isEmpty())
-        dailyRequestBudget = AUTHED_TOKENS_PER_DAY - TOKEN_BUFFER; // authed tokens minus buffer
+    const bool authenticated = !token.isEmpty();
 
-    fetchInterval = MS_PER_DAY / dailyRequestBudget;
+    fetchInterval = OpenSkyBudget::MS_PER_DAY / OpenSkyBudget::StatesAllBudget(authenticated);
 }
 
 void AircraftManager::Update()
@@ -80,6 +79,10 @@ void AircraftManager::Update()
                 trackedAircraft.emplace(ac.icao24, TrackedAircraft{ ac, now });
             else
                 it->second.Update(ac, now);
+
+            String trimmedCallsign = ac.callsign;
+            trimmedCallsign.trim();
+            routeManager.RequestLookup(trimmedCallsign);
         }
 
         // remove any planes that disappeared from the feed
@@ -110,7 +113,7 @@ void AircraftManager::Draw(LGFX_Sprite& backbuffer)
         if (displayTriangles)
             DrawAircraftTriangle(backbuffer, x, y, tracked);
         else
-            backbuffer.fillCircle(x, y, 3, lgfx::color888(0, 255, 0));
+            backbuffer.fillCircle(x, y, 3, CategoryColors::CategoryColor(tracked.state.category));
     }
 }
 
@@ -119,34 +122,39 @@ void AircraftManager::DrawRadarCircles(LGFX_Sprite& backbuffer) const
     constexpr int CENTRE = SCREEN_SIZE_DIV_2 - 1;
     constexpr int OUTER = SCREEN_SIZE_DIV_2 - 1;
 
-    backbuffer.drawCircle(CENTRE, CENTRE, OUTER, lgfx::color888(0, 200, 0));
-    backbuffer.drawCircle(CENTRE, CENTRE, (OUTER / 3) * 2, lgfx::color888(0, 64, 0));
-    backbuffer.drawCircle(CENTRE, CENTRE, OUTER / 3, lgfx::color888(0, 32, 0));
+    const uint32_t sea = CoastlineManager::SeaColor();
+    const uint32_t radar = CategoryColors::RadarColor();
+    backbuffer.drawCircle(CENTRE, CENTRE, OUTER, radar);
+    backbuffer.drawCircle(CENTRE, CENTRE, (OUTER / 3) * 2, ColorUtils::BlendToward(radar, sea, 0.55f));
+    backbuffer.drawCircle(CENTRE, CENTRE, OUTER / 3, ColorUtils::BlendToward(radar, sea, 0.28f));
 }
 
 std::pair<int, int> AircraftManager::ProjectCoordinateToScreen(float predLat, float predLon) const
 {
-    const float dLon = predLon - lon;
-    const float dLat = predLat - lat;
-
-    const float normLon = (dLon + rad) / (2.0f * rad);
-    const float normLat = (dLat + rad) / (2.0f * rad);
-
-    const int x = static_cast<int>(normLon * SCREEN_SIZE);
-    const int y = static_cast<int>(SCREEN_SIZE - (normLat * SCREEN_SIZE));
-
-    return { x, y };
+    return Projection::ToScreen(predLat, predLon, lat, lon, rad, SCREEN_SIZE);
 }
 
 void AircraftManager::DrawAircraftInfo(LGFX_Sprite& backbuffer, int x, int y, const TrackedAircraft& tracked) const
 {
     const int lineHeight = tft.fontHeight() + 1;
 
+    String trimmedCallsign = tracked.state.callsign;
+    trimmedCallsign.trim();
+
+    const RouteInfo* route = routeManager.GetRoute(trimmedCallsign);
+    const bool haveRoute = route != nullptr && route->resolved && route->found;
+
     backbuffer.setTextSize(1);
-    backbuffer.setTextColor(lgfx::color888(0, 128, 0));
-    backbuffer.drawString(tracked.state.callsign, x + 5, y + 5);
-    backbuffer.drawString(String(tracked.state.velocity) + "m/s", x + 5, y + 5 + lineHeight);
-    backbuffer.drawString(String(tracked.state.baroAltitude) + "m", x + 5, y + 5 + lineHeight * 2);
+    backbuffer.setTextColor(ColorUtils::BlendToward(CategoryColors::CategoryColor(tracked.state.category), CategoryColors::LABEL_BACKGROUND_TONE, 0.72f));
+    backbuffer.drawString(trimmedCallsign, x + 5, y + 5);
+
+    // No route data yet (still queued/throttled) or genuinely not found for
+    // this callsign - just show the flight number rather than a couple of
+    // "O: --" / "D: --" placeholder lines that add clutter without info.
+    if (haveRoute) {
+        backbuffer.drawString("O: " + route->origin, x + 5, y + 5 + lineHeight);
+        backbuffer.drawString("D: " + route->destination, x + 5, y + 5 + lineHeight * 2);
+    }
 }
 
 void AircraftManager::DrawAircraftTriangle(LGFX_Sprite& backbuffer, int x, int y, const TrackedAircraft& tracked) const
@@ -166,5 +174,5 @@ void AircraftManager::DrawAircraftTriangle(LGFX_Sprite& backbuffer, int x, int y
     const float rightX = x - dx * TRIANGLE_LENGTH * 0.5f - px * TRIANGLE_WIDTH * 0.5f;
     const float rightY = y - dy * TRIANGLE_LENGTH * 0.5f - py * TRIANGLE_WIDTH * 0.5f;
 
-    backbuffer.fillTriangle(tipX, tipY, leftX, leftY, rightX, rightY, lgfx::color888(0, 255, 0));
+    backbuffer.fillTriangle(tipX, tipY, leftX, leftY, rightX, rightY, CategoryColors::CategoryColor(tracked.state.category));
 }

@@ -5,6 +5,7 @@
 #include "models/TrackedAircraft.h"
 #include "ConfigurationWebServer.h"
 #include "OpenSkyAuthTokenHandler.h"
+#include "RouteLookupManager.h"
 #include "LGFX.h"
 
 class AircraftManager
@@ -25,6 +26,7 @@ private:
     OpenSkyAuthTokenHandler& authHandler;
     HttpRequestManager& http;
     LGFX& tft;
+    RouteLookupManager& routeManager;
 
     void DrawRadarCircles(LGFX_Sprite& backbuffer) const;
     std::pair<int, int> ProjectCoordinateToScreen(float predLat, float predLon) const;
@@ -32,8 +34,8 @@ private:
     void DrawAircraftTriangle(LGFX_Sprite& backbuffer, int x, int y, const TrackedAircraft& tracked) const;
 
 public:
-    AircraftManager(ConfigurationWebServer& config, OpenSkyAuthTokenHandler& auth, HttpRequestManager& httpManager, LGFX& tftGfx)
-        : configServer(config), authHandler(auth), http(httpManager), tft(tftGfx)
+    AircraftManager(ConfigurationWebServer& config, OpenSkyAuthTokenHandler& auth, HttpRequestManager& httpManager, LGFX& tftGfx, RouteLookupManager& routeLookupManager)
+        : configServer(config), authHandler(auth), http(httpManager), tft(tftGfx), routeManager(routeLookupManager)
     {
     }
     ~AircraftManager() = default;

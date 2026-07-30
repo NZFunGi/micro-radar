@@ -21,13 +21,14 @@ String HttpRequestManager::BuildQueryString(const std::vector<std::pair<String, 
     return queryStream;
 }
 
-HttpResult HttpRequestManager::Get(const String& url, const std::vector<std::pair<String, String>>& params, const std::vector<std::pair<String, String>>& headers) {
+HttpResult HttpRequestManager::Get(const String& url, const std::vector<std::pair<String, String>>& params, const std::vector<std::pair<String, String>>& headers, size_t maxResponseBytes, int timeoutMs) {
     HttpResult result{ false, 0, "", "" };
 
     const String queryParams = BuildQueryString(params);
     const String fullUrl = url + queryParams;
 
     http.begin(fullUrl);
+    if (timeoutMs > 0) http.setTimeout(timeoutMs);
 
     // add headers to request
     for (const auto& header : headers) {
@@ -39,8 +40,30 @@ HttpResult HttpRequestManager::Get(const String& url, const std::vector<std::pai
     result.statusCode = responseCode;
 
     if (responseCode > 0) {
-        result.success = true;
-        result.response = http.getString();
+        // getSize() is -1 when the server doesn't send Content-Length (e.g. chunked
+        // transfer encoding) - that means "unknown", not "huge". Casting -1 to
+        // size_t wraps to SIZE_MAX, which would always trip a naive ">" check
+        // against maxResponseBytes and reject every chunked response outright, so
+        // only pre-emptively reject when the size is actually known.
+        const int reportedSize = http.getSize();
+        if (maxResponseBytes > 0 && reportedSize > 0 && (size_t)reportedSize > maxResponseBytes) {
+            result.success = false;
+            result.errorMessage = "Response too large";
+        }
+        else {
+            result.response = http.getString();
+            // Unknown-size (chunked) responses aren't caught by the check above, so
+            // enforce the cap after the fact too - still bounds what callers ever
+            // receive, even though the body was already read into memory by then.
+            if (maxResponseBytes > 0 && result.response.length() > maxResponseBytes) {
+                result.success = false;
+                result.errorMessage = "Response too large";
+                result.response = "";
+            }
+            else {
+                result.success = true;
+            }
+        }
     }
     else {
         result.success = false;
@@ -55,11 +78,12 @@ HttpResult HttpRequestManager::Get(const String& url, const std::vector<std::pai
     return result;
 }
 
-HttpResult HttpRequestManager::Post(const String& url, const String& body, const std::vector<std::pair<String, String>>& headers)
+HttpResult HttpRequestManager::Post(const String& url, const String& body, const std::vector<std::pair<String, String>>& headers, size_t maxResponseBytes, int timeoutMs)
 {
     HttpResult result{ false, 0, "", "" };
 
     http.begin(url);
+    if (timeoutMs > 0) http.setTimeout(timeoutMs);
 
     // add headers to request
     for (const auto& header : headers) {
@@ -71,8 +95,23 @@ HttpResult HttpRequestManager::Post(const String& url, const String& body, const
     result.statusCode = responseCode;
 
     if (responseCode > 0) {
-        result.success = true;
-        result.response = http.getString();
+        // see Get() for why unknown (-1) size must not be treated as "too large"
+        const int reportedSize = http.getSize();
+        if (maxResponseBytes > 0 && reportedSize > 0 && (size_t)reportedSize > maxResponseBytes) {
+            result.success = false;
+            result.errorMessage = "Response too large";
+        }
+        else {
+            result.response = http.getString();
+            if (maxResponseBytes > 0 && result.response.length() > maxResponseBytes) {
+                result.success = false;
+                result.errorMessage = "Response too large";
+                result.response = "";
+            }
+            else {
+                result.success = true;
+            }
+        }
     }
     else {
         result.success = false;

@@ -21,6 +21,8 @@ public:
     HttpRequestManager() = default;
     ~HttpRequestManager() = default;
 
-    [[nodiscard]] HttpResult Get(const String& url, const std::vector<std::pair<String, String>>& params = {}, const std::vector<std::pair<String, String>>& headers = {});
-    [[nodiscard]] HttpResult Post(const String& url, const String& body = "", const std::vector<std::pair<String, String>>& headers = {});
+    // maxResponseBytes: if > 0, abort (success = false) rather than reading a body larger than this.
+    // timeoutMs: if > 0, overrides the default HTTPClient timeout for this request.
+    [[nodiscard]] HttpResult Get(const String& url, const std::vector<std::pair<String, String>>& params = {}, const std::vector<std::pair<String, String>>& headers = {}, size_t maxResponseBytes = 0, int timeoutMs = 0);
+    [[nodiscard]] HttpResult Post(const String& url, const String& body = "", const std::vector<std::pair<String, String>>& headers = {}, size_t maxResponseBytes = 0, int timeoutMs = 0);
 };

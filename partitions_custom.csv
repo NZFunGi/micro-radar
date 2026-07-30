@@ -1,0 +1,20 @@
+# Name,   Type, SubType, Offset,  Size, Flags
+# Based on the Arduino ESP32 "huge_app" scheme, but with NVS grown from the
+# default 20KB (0x5000) to 256KB (0x40000) - a coastline push can be up to
+# ~24KB by itself (see CoastlineManager::MAX_RUNTIME_COASTLINE_POINTS), which
+# alone nearly filled the original partition before even counting WiFi
+# credentials, OpenSky API keys, colors, and location.
+#
+# otadata and app0 are deliberately left at huge_app.csv's exact default
+# offsets (0xe000 / 0x10000) - PlatformIO's upload step hardcodes
+# boot_app0.bin and firmware.bin to those addresses regardless of what this
+# CSV says, so moving them (as an earlier version of this file did) leaves
+# the compiled app written somewhere the bootloader's actual partition table
+# doesn't point to, which looks like a bricked/silent device. NVS is
+# relocated to after app0 instead (where the unused spiffs partition used to
+# be - nothing in this project touches a filesystem), which needs no such
+# fixed address.
+otadata,  data, ota,     0xe000,  0x2000,
+app0,     app,  ota_0,   0x10000, 0x300000,
+nvs,      data, nvs,     0x310000,0x40000,
+coredump, data, coredump,0x350000,0x10000,

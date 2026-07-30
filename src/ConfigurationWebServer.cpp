@@ -1,4 +1,5 @@
 #include "ConfigurationWebServer.h"
+#include "GeoUnits.h"
 #include <ESPmDNS.h>
 
 // HTML stored in flash
@@ -43,13 +44,13 @@ static const char CONFIG_HTML[] PROGMEM = R"(
                 </div>
 
                 <label class="flex flex-col sm:flex-row items-start sm:items-center gap-2">
-                    <span>Radius (in &deg;):</span>
+                    <span>Radius (km):</span>
                     <input
                         name="radius"
                         type="number"
-                        min="0.000001"
-                        step="0.000001"
-                        max="2.499999"
+                        min="0.1"
+                        step="0.1"
+                        max="278.3"
                         value='%RADIUS%'
                         class="flex-1 border border-green-500 bg-gray-900 w-full px-3 py-2 text-lg sm:text-base sm:px-1 sm:py-0">
                 </label>
@@ -95,6 +96,14 @@ static const char CONFIG_HTML[] PROGMEM = R"(
                             %TRIANGLE%
                             class="px-3 sm:px-1 accent-green-500">
                     </label>
+                    <label class="flex flex-col sm:flex-row items-start sm:items-center gap-2">
+                        <span>Coastline:</span>
+                        <input
+                            name="coastline"
+                            type="checkbox"
+                            %COASTLINE%
+                            class="px-3 sm:px-1 accent-green-500">
+                    </label>
                 </div>
 
                 <div class="flex flex-col sm:flex-row gap-4 sm:gap-5">
@@ -134,12 +143,14 @@ void ConfigurationWebServer::Initialise() {
         prefs.begin("config", true);
         const String latitude = prefs.getString("latitude", "");
         const String longitude = prefs.getString("longitude", "");
-        const String radius = prefs.getString("radius", "1.0");
+        const String radiusDegStored = prefs.getString("radius", "1.0");
+        const String radius = String(radiusDegStored.toDouble() * GeoUnits::KM_PER_DEGREE, 3);
         const String openskyClientId = prefs.getString("opensky-id", "");
         String openskySecret = prefs.getString("opensky-secret", "");
         const String scanlineEnabled = prefs.getString("scanline", "true");
         const String infoTextEnabled = prefs.getString("infotext", "true");
         const String triangleEnabled = prefs.getString("triangle", "true");
+        const String coastlineEnabled = prefs.getString("coastline", "true");
         prefs.end();
 
         // mask secret before sending to client
@@ -149,7 +160,7 @@ void ConfigurationWebServer::Initialise() {
         AsyncWebServerResponse* response = request->beginResponse(
             200, "text/html",
             (const uint8_t*)CONFIG_HTML, sizeof(CONFIG_HTML) - 1,
-            [latitude, longitude, radius, openskyClientId, openskySecret, scanlineEnabled, infoTextEnabled, triangleEnabled]
+            [latitude, longitude, radius, openskyClientId, openskySecret, scanlineEnabled, infoTextEnabled, triangleEnabled, coastlineEnabled]
             (const String& var) -> String {
                 if (var == "LATITUDE")       return latitude;
                 if (var == "LONGITUDE")      return longitude;
@@ -159,6 +170,7 @@ void ConfigurationWebServer::Initialise() {
                 if (var == "SCANLINE")       return scanlineEnabled == "true" ? "checked" : "";
                 if (var == "INFOTEXT")       return infoTextEnabled == "true" ? "checked" : "";
                 if (var == "TRIANGLE")       return triangleEnabled == "true" ? "checked" : "";
+                if (var == "COASTLINE")      return coastlineEnabled == "true" ? "checked" : "";
                 return "";
             }
         );
@@ -184,8 +196,13 @@ void ConfigurationWebServer::Initialise() {
 
         TrySaveParam("latitude");
         TrySaveParam("longitude");
-        TrySaveParam("radius");
         TrySaveParam("opensky-id");
+
+        const auto* radiusParam = request->getParam("radius", true);
+        if (radiusParam != nullptr) {
+            const double radiusKm = radiusParam->value().toDouble();
+            prefs.putString("radius", String(radiusKm / GeoUnits::KM_PER_DEGREE, 6));
+        }
 
         const auto* param = request->getParam("opensky-secret", true);
         if (param != nullptr) {
@@ -198,6 +215,7 @@ void ConfigurationWebServer::Initialise() {
         prefs.putString("scanline", request->hasParam("scanline", true) ? "true" : "false");
         prefs.putString("triangle", request->hasParam("triangle", true) ? "true" : "false");
         prefs.putString("infotext", request->hasParam("infotext", true) ? "true" : "false");
+        prefs.putString("coastline", request->hasParam("coastline", true) ? "true" : "false");
         prefs.end();
 
         request->send(200, "text/html", "Saved - restarting device...");
