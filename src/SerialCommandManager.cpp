@@ -2,6 +2,27 @@
 #include "ColorConfig.h"
 
 #include <Preferences.h>
+#include <algorithm>
+
+namespace {
+    // Minimal JSON string escaping for values embedded in this file's
+    // hand-built JSON (see GET_CONFIG below). Only backslash and double
+    // quote need escaping to keep the output valid JSON. Every other field
+    // GET_CONFIG emits is either numeric, a boolean literal, or drawn from a
+    // fixed key set (color names) - the OpenSky client ID is the only
+    // arbitrary user-entered text that flows into it, hence the one call
+    // site below.
+    String EscapeJsonString(const String& value) {
+        String escaped;
+        escaped.reserve(value.length());
+        for (size_t i = 0; i < value.length(); i++) {
+            const char c = value[i];
+            if (c == '\\' || c == '"') escaped += '\\';
+            escaped += c;
+        }
+        return escaped;
+    }
+}
 
 void SerialCommandManager::Update()
 {
@@ -43,9 +64,33 @@ void SerialCommandManager::HandleCommand(const String& line)
         const String lat = prefs.getString("latitude", "0");
         const String lon = prefs.getString("longitude", "0");
         const String rad = prefs.getString("radius", "1.0");
+        const String openskyId = prefs.getString("opensky-id", "");
+        String openskySecret = prefs.getString("opensky-secret", "");
+        const String scanlineEnabled = prefs.getString("scanline", "true");
+        const String infotextEnabled = prefs.getString("infotext", "true");
+        const String triangleEnabled = prefs.getString("triangle", "true");
+        const String coastlineEnabled = prefs.getString("coastline", "true");
         prefs.end();
 
-        String json = "{\"lat\":" + lat + ",\"lon\":" + lon + ",\"radius\":" + rad + ",\"colors\":{";
+        // Mask the secret exactly like ConfigurationWebServer's web page
+        // does (same-length string of '*', empty if unset) - never echo the
+        // real secret back over serial. SET_OPENSKY_AUTH recognises a value
+        // containing '*' as this masked placeholder and leaves the stored
+        // secret untouched rather than overwriting it with asterisks, so a
+        // companion app can safely round-trip this field unless the user
+        // actually types a new secret.
+        std::fill(openskySecret.begin(), openskySecret.end(), '*');
+
+        String json = "{\"lat\":" + lat + ",\"lon\":" + lon + ",\"radius\":" + rad;
+        json += ",\"openskyId\":\"" + EscapeJsonString(openskyId) + "\"";
+        json += ",\"openskySecret\":\"" + openskySecret + "\""; // always just '*' repeated (or empty) - never needs escaping
+        json += ",\"toggles\":{";
+        json += String("\"scanline\":") + (scanlineEnabled == "true" ? "true" : "false");
+        json += String(",\"infotext\":") + (infotextEnabled == "true" ? "true" : "false");
+        json += String(",\"triangle\":") + (triangleEnabled == "true" ? "true" : "false");
+        json += String(",\"coastline\":") + (coastlineEnabled == "true" ? "true" : "false");
+        json += "}";
+        json += ",\"colors\":{";
         for (int i = 0; i < ColorConfig::COUNT; i++) {
             const auto key = static_cast<ColorConfig::Key>(i);
             const uint32_t color = ColorConfig::Get(key);
@@ -109,6 +154,73 @@ void SerialCommandManager::HandleCommand(const String& line)
         // Update in-memory projection too, so a coastline push that follows
         // in the same session (same lat/lon/radius) can apply live.
         coastline.SetLocation(newLat, newLon, newRad);
+        Serial.println("OK");
+        return;
+    }
+
+    if (line.startsWith("SET_OPENSKY_AUTH ")) {
+        const String rest = line.substring(17);
+        const int space = rest.indexOf(' ');
+        if (space < 0) {
+            Serial.println("ERR expected: SET_OPENSKY_AUTH <clientId> <clientSecret>");
+            return;
+        }
+
+        const String clientId = rest.substring(0, space);
+        const String clientSecret = rest.substring(space + 1);
+
+        Preferences prefs;
+        prefs.begin("config", false);
+        prefs.putString("opensky-id", clientId);
+        // Same "don't overwrite with masked value" guard as
+        // ConfigurationWebServer's web form (see GET_CONFIG above for where
+        // the masked value comes from) - a caller that just round-trips
+        // whatever GET_CONFIG returned won't accidentally blank out an
+        // already-set secret.
+        if (clientSecret.indexOf('*') == -1) {
+            prefs.putString("opensky-secret", clientSecret);
+        }
+        prefs.end();
+
+        Serial.println("OK");
+        return;
+    }
+
+    if (line.startsWith("SET_TOGGLE ")) {
+        const String rest = line.substring(11);
+        const int space = rest.indexOf(' ');
+        if (space < 0) {
+            Serial.println("ERR expected: SET_TOGGLE <name> <true|false>");
+            return;
+        }
+
+        const String name = rest.substring(0, space);
+        const String value = rest.substring(space + 1);
+
+        // Must match the exact preference keys ConfigurationWebServer's web
+        // form writes (scanline/infotext/triangle/coastline) - AircraftManager,
+        // main.cpp, and CoastlineManager all read these back with a literal
+        // "true" string comparison, not a bool, so the value written here
+        // has to be exactly "true" or "false".
+        static const char* knownToggles[] = { "scanline", "infotext", "triangle", "coastline" };
+        bool validName = false;
+        for (const char* known : knownToggles) {
+            if (name == known) { validName = true; break; }
+        }
+        if (!validName) {
+            Serial.println("ERR unknown toggle: " + name);
+            return;
+        }
+        if (value != "true" && value != "false") {
+            Serial.println("ERR expected true or false, got: " + value);
+            return;
+        }
+
+        Preferences prefs;
+        prefs.begin("config", false);
+        prefs.putString(name.c_str(), value);
+        prefs.end();
+
         Serial.println("OK");
         return;
     }

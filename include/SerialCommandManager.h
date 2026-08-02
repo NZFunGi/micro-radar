@@ -13,12 +13,34 @@
 //
 // Commands are newline-terminated, one per line:
 //   PING                                          -> "PONG"
-//   GET_CONFIG                                    -> one-line JSON snapshot
+//   GET_CONFIG                                    -> one-line JSON snapshot: lat/lon/radius,
+//                                                     the OpenSky client ID (plaintext) and
+//                                                     client secret (masked with '*' at its
+//                                                     stored length, same convention as the
+//                                                     on-device web config page), the
+//                                                     scanline/infotext/triangle/coastline
+//                                                     display toggles, and the color palette
 //   SET_COLOR <KEY> <RRGGBB hex>                  -> "OK" / "ERR <reason>"
 //                                                     (applies immediately, no restart)
 //   SET_LOCATION <lat> <lon> <radius>             -> "OK"
 //                                                     (persisted; radar radius/network
 //                                                     fetch only fully applies after RESTART)
+//   SET_OPENSKY_AUTH <clientId> <clientSecret>    -> "OK"
+//                                                     (persisted; only fully applies after
+//                                                     RESTART, since the daily request budget
+//                                                     is computed once at boot from whether
+//                                                     credentials are present - see
+//                                                     OpenSkyBudget.h. clientSecret may be the
+//                                                     masked value GET_CONFIG returned - if it
+//                                                     contains '*' the stored secret is left
+//                                                     unchanged, exactly like the web config
+//                                                     page's "don't overwrite with masked
+//                                                     value" handling)
+//   SET_TOGGLE <name> <true|false>                -> "OK" / "ERR unknown toggle: <name>"
+//                                                     name is one of: scanline, infotext,
+//                                                     triangle, coastline (persisted; only
+//                                                     fully applies after RESTART, since these
+//                                                     are read once at boot)
 //   COASTLINE_BEGIN <count> <lat> <lon> <radius>  -> "OK" / "ERR <reason>"
 //   <latMicro>,<lonMicro>                            (repeated `count` times - the device
 //                                                     sends "PROGRESS <n>" every

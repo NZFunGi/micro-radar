@@ -9,6 +9,7 @@ constexpr int SCREEN_SIZE = 240;
 constexpr int SCREEN_SIZE_DIV_2 = (SCREEN_SIZE / 2);
 
 #include <ArduinoJson.h>
+#include <set>
 
 void AircraftManager::Initialise()
 {
@@ -73,6 +74,11 @@ void AircraftManager::Update()
         auto aircraft = JsonParser::ParseArray<Aircraft>(doc["states"]);
         now = millis(); // override with post-parse timestamp
 
+        // Collected alongside the RequestLookup calls below so we can tell
+        // RouteLookupManager which callsigns are actually still in view once
+        // the loop's done - see the PruneQueueExcept call below.
+        std::set<String> activeCallsigns;
+
         for (auto& ac : aircraft) {
             auto it = trackedAircraft.find(ac.icao24);
             if (it == trackedAircraft.end())
@@ -83,7 +89,19 @@ void AircraftManager::Update()
             String trimmedCallsign = ac.callsign;
             trimmedCallsign.trim();
             routeManager.RequestLookup(trimmedCallsign);
+            if (!trimmedCallsign.isEmpty()) activeCallsigns.insert(trimmedCallsign);
         }
+
+        // A queued route lookup is only useful if the aircraft it's for is
+        // still on screen by the time its turn comes up - the lookup rate is
+        // throttled to share OpenSky's daily quota with position polling
+        // (see OpenSkyBudget.h), so in a busy area the queue can otherwise
+        // fill up with callsigns that have long since left the tracked
+        // radius, permanently crowding out aircraft that are actually
+        // visible right now. Dropping anything not in this fetch's active
+        // set keeps the queue relevant to the current screen instead of
+        // whatever happened to be in view whenever it was first queued.
+        routeManager.PruneQueueExcept(activeCallsigns);
 
         // remove any planes that disappeared from the feed
         for (auto it = trackedAircraft.begin(); it != trackedAircraft.end(); ) {

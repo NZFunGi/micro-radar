@@ -210,7 +210,7 @@ Aircraft are colored by their OpenSky emitter category (light, large, heavy, rot
 
 ### Flight number & route info
 
-Each aircraft label shows its flight number, and - once resolved - its origin and destination airport (`O: <code>` / `D: <code>`), looked up via OpenSky's routes API. Route lookups are throttled to share the same daily request budget as position polling, so newly-appeared aircraft can take a little while to show a route the first time; already-seen callsigns are cached for the rest of the session.
+Each aircraft label shows its flight number, and - once resolved - its origin and destination airport (`O: <code>` / `D: <code>`), looked up via OpenSky's routes API. Route lookups are throttled to share the same daily request budget as position polling, so newly-appeared aircraft can take a little while to show a route the first time; already-seen callsigns are cached for the rest of the session. The lookup queue is also kept trimmed to whatever's currently on screen, so a busy area can't leave currently-visible aircraft permanently stuck behind the backlog of ones that have already left; and a transient OpenSky error (rate-limited, momentary outage, etc.) is retried rather than being treated as a confirmed "no route on file".
 
 ### Range shown in km
 
@@ -223,6 +223,7 @@ A Windows desktop app - [NZFunGi/micro-radar-companion](https://github.com/NZFun
 - Pick colors live (native color picker or type a hex code) - applies instantly, no restart
 - Edit location and range (in km)
 - Regenerate the coastline overlay for any location/range by fetching real OpenStreetMap data, classifying land vs sea, and pushing it to the device - no firmware rebuild needed
+- Set the OpenSky API Client ID/Secret and the four display toggles (radar sweep, aircraft info, directional aircraft, coastline) - previously only settable via the device's own web config page; saving these restarts the device to apply them, since they're only read once at boot
 
 <p align="center">
   <img src="docs/companion-app-screenshot.png" alt="Companion app screenshot" width="420"/>
@@ -279,7 +280,17 @@ The firmware only has one location's coastline data pre-baked in (see [Fork Feat
 
 > Route info (`O:` / `D:`) never shows up for some aircraft, just the flight number
 
-This is usually expected, not a bug - route lookups are throttled to share the same daily OpenSky request budget as position polling (roughly one new lookup every couple of minutes if you're authenticated, longer if not), and every device reboot resets the lookup queue and cache. Give it a few minutes of uninterrupted uptime; already-resolved callsigns stay cached for the rest of the session. Some aircraft genuinely have no route on file at OpenSky, in which case it'll never resolve.
+Usually expected, not a bug - route lookups are throttled to share the same daily OpenSky request budget as position polling (roughly one new lookup every couple of minutes if you're authenticated, longer if not), and every device reboot resets the lookup queue and cache. Give it a few minutes of uninterrupted uptime; already-resolved callsigns stay cached for the rest of the session. Some aircraft genuinely have no route on file at OpenSky, in which case it'll never resolve.
+
+Double-check the OpenSky Client ID/Secret are actually set (device web config page, or the companion app's **OpenSky API & display options** box) - without them, the anonymous request budget is much smaller and lookups can take on the order of ten-plus minutes each instead of a couple.
+
+If routes seem to *never* resolve at all even after a good few minutes with credentials set, that pointed at a real bug in earlier versions of this fork: any OpenSky response other than a clean success or a confirmed `404` (a `429` rate-limit, a `5xx`, an auth hiccup, etc.) used to get cached as a permanent "no route on file" for that callsign, so one transient error silently and irrecoverably killed that flight's route for the rest of the session. This is fixed as of this version - see `RouteLookupManager::Update()`'s status-code handling - transient errors are now retried instead of cached.
+
+**If you're watching a specific flight you know has a real route (checked on FlightAware/Flightradar24/etc.) and it's just not resolving yet**, this is very likely a backlog, not a bug: the lookup queue is strict FIFO, so a flight has to wait behind every other distinct callsign that was queued before it. In a busy area (lots of distinct aircraft passing through your configured radius), that queue can easily run 10-20+ deep, and at the default budget split a single flight can end up waiting 20+ minutes for its turn - if it leaves your radar's radius before then, it's silently dropped rather than resolved (so it may never show up at all, even though nothing actually went wrong). Watch the serial log for `[INFO] Queued route lookup for <callsign>` followed eventually by either a `->` resolution or `No route on file` - if you see many `Queued` lines accumulating much faster than resolutions, that confirms it's a backlog. The fix is to shift more of the daily OpenSky budget toward route lookups: `OpenSkyBudget::ROUTE_LOOKUP_BUDGET_SHARE` in `include/OpenSkyBudget.h` (default `0.4`, i.e. 40% of the daily quota - raised from the original `0.2` for exactly this reason) controls the split against `/states/all` position polling. Raising it further shortens the queue backlog at the cost of slightly less frequent position updates, which barely matters visually since aircraft already smoothly interpolate between polls rather than jumping.
+
+**If you've checked all of the above and it's still consistently `No route on file` for everything**, including flights you've independently verified are real and scheduled: this is very likely OpenSky's own data coverage, not this firmware. `/api/routes` is a crowdsourced database, and its coverage skews heavily toward well-tracked international long-haul routes rather than domestic/regional traffic. Confirmed directly against OpenSky's public API (no device involved): a famous long-haul route (`QFA1`, Qantas' Sydney-Singapore-London service) returns real data, while several genuinely real, currently-scheduled domestic flights (Air New Zealand and Jetstar domestic sectors, tested both with and without the trailing `L` some domestic ATC callsigns carry) all returned a clean `404` - OpenSky simply has no route on file for them, full stop, no matter how long you wait or how the request is made. If most of your traffic is regional/domestic, expect `O:`/`D:` to show up only occasionally, mostly for the international flights passing through - that's a limitation of OpenSky's dataset, not something this firmware can fix.
+
+If you're still not seeing routes after checking all of the above, please open an [Issue](../../issues).
 <br/><br/>
 
 > I flashed this fork over an existing install and now nothing works / the device won't boot properly

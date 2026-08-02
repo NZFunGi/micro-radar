@@ -65,6 +65,17 @@ void RouteLookupManager::Update()
         return;
     }
 
+    if (result.statusCode < 200 || result.statusCode >= 300) {
+        Serial.print("[WARN] OpenSky route lookup for ");
+        Serial.print(callsign);
+        Serial.print(" returned unexpected status ");
+        Serial.println(result.statusCode);
+        // don't cache - a 429/5xx/auth hiccup is transient, not a confirmed
+        // "no route on file"; AircraftManager will re-request this callsign
+        // on a later Update() same as the network-failure case above
+        return;
+    }
+
     cache[callsign] = ParseRouteResponse(result.response);
 
     // Everything else in this file only logs on failure, which makes "is
@@ -79,6 +90,18 @@ void RouteLookupManager::Update()
         Serial.print(" -> "); Serial.println(resolved.destination);
     } else {
         Serial.println(": unresolved (bad response)");
+    }
+}
+
+void RouteLookupManager::PruneQueueExcept(const std::set<String>& activeCallsigns)
+{
+    for (auto it = queue.begin(); it != queue.end(); ) {
+        if (activeCallsigns.find(*it) == activeCallsigns.end()) {
+            queued.erase(*it);
+            it = queue.erase(it);
+        } else {
+            ++it;
+        }
     }
 }
 

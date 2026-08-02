@@ -46,5 +46,16 @@ public:
     void Initialise();
     void Update();
     void RequestLookup(const String& trimmedCallsign);
+
+    // Drops any not-yet-looked-up entry from the queue whose callsign isn't
+    // in activeCallsigns. Intended to be called once per AircraftManager
+    // fetch cycle with the set of callsigns currently on screen, so a queue
+    // backlog (unavoidable in busy areas given the throttle above) only ever
+    // holds lookups for aircraft that are still actually visible, instead of
+    // aging out currently-visible aircraft behind ones that left long ago.
+    // Already-cached routes are untouched - a plane that reappears with the
+    // same callsign still benefits from the earlier lookup.
+    void PruneQueueExcept(const std::set<String>& activeCallsigns);
+
     const RouteInfo* GetRoute(const String& trimmedCallsign) const;
 };
