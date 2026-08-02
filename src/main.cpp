@@ -70,7 +70,17 @@ void setup()
 
   WiFiManagerHelpers::ConfigureWiFiManager(wm, tft);
 
-  if (strlen(preconfiguredWifiSsid) > 0) {
+  // Credentials set via the companion app's SET_WIFI (see
+  // SerialCommandManager::HandleWifiDataLine) take priority over the
+  // hard-coded constants above, since they're the more recently and
+  // deliberately configured source - both are just a faster path to a known
+  // network than the WiFiManager captive portal below, which remains the
+  // fallback either way.
+  const String storedWifiSsid = configServer.GetStoredString("wifi-ssid");
+  if (!storedWifiSsid.isEmpty()) {
+    WiFi.begin(storedWifiSsid.c_str(), configServer.GetStoredString("wifi-password").c_str());
+    WiFi.waitForConnectResult();
+  } else if (strlen(preconfiguredWifiSsid) > 0) {
     WiFi.begin(preconfiguredWifiSsid, preconfiguredWifiPassword);
     WiFi.waitForConnectResult();
   }

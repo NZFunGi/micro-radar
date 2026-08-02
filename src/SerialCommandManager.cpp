@@ -2,6 +2,7 @@
 #include "ColorConfig.h"
 
 #include <Preferences.h>
+#include <WiFi.h>
 #include <algorithm>
 
 namespace {
@@ -32,6 +33,12 @@ void SerialCommandManager::Update()
         pendingPoints.clear();
     }
 
+    if (wifiReceiveStep != WifiReceiveStep::None && millis() - lastWifiLineMs > WIFI_STALL_TIMEOUT_MS) {
+        Serial.println("ERR SET_WIFI stalled - abandoned, back to normal commands");
+        wifiReceiveStep = WifiReceiveStep::None;
+        pendingWifiSsid = "";
+    }
+
     while (Serial.available() > 0) {
         const char c = static_cast<char>(Serial.read());
         if (c == '\n') {
@@ -48,6 +55,7 @@ void SerialCommandManager::Update()
 void SerialCommandManager::HandleLine(const String& line)
 {
     if (receivingCoastline) HandleCoastlineDataLine(line);
+    else if (wifiReceiveStep != WifiReceiveStep::None) HandleWifiDataLine(line);
     else HandleCommand(line);
 }
 
@@ -84,6 +92,12 @@ void SerialCommandManager::HandleCommand(const String& line)
         String json = "{\"lat\":" + lat + ",\"lon\":" + lon + ",\"radius\":" + rad;
         json += ",\"openskyId\":\"" + EscapeJsonString(openskyId) + "\"";
         json += ",\"openskySecret\":\"" + openskySecret + "\""; // always just '*' repeated (or empty) - never needs escaping
+        // Live currently-connected SSID (WiFi.SSID(), not a stored preference) -
+        // accurate regardless of whether it came from the captive portal,
+        // hard-coded firmware constants, or SET_WIFI below. No password is
+        // ever reported - see SET_WIFI's doc comment for why there's no
+        // masked-round-trip convention here like there is for the OpenSky secret.
+        json += ",\"wifiSsid\":\"" + EscapeJsonString(WiFi.SSID()) + "\"";
         json += ",\"toggles\":{";
         json += String("\"scanline\":") + (scanlineEnabled == "true" ? "true" : "false");
         json += String(",\"infotext\":") + (infotextEnabled == "true" ? "true" : "false");
@@ -225,6 +239,14 @@ void SerialCommandManager::HandleCommand(const String& line)
         return;
     }
 
+    if (line == "SET_WIFI") {
+        pendingWifiSsid = "";
+        wifiReceiveStep = WifiReceiveStep::AwaitingSsid;
+        lastWifiLineMs = millis();
+        Serial.println("OK");
+        return;
+    }
+
     if (line.startsWith("COASTLINE_BEGIN ")) {
         const String rest = line.substring(16);
         const int p1 = rest.indexOf(' ');
@@ -301,4 +323,38 @@ void SerialCommandManager::HandleCoastlineDataLine(const String& line)
         Serial.print("PROGRESS ");
         Serial.println(received);
     }
+}
+
+void SerialCommandManager::HandleWifiDataLine(const String& line)
+{
+    // Note: line has already been through SerialCommandManager::Update()'s
+    // lineBuffer.trim() before reaching here, so leading/trailing whitespace
+    // typed by a human at a terminal is stripped - a real SSID/password
+    // containing meaningful internal spaces (e.g. "My Home WiFi") still
+    // comes through untouched, only the outer edges are trimmed.
+    lastWifiLineMs = millis();
+
+    if (wifiReceiveStep == WifiReceiveStep::AwaitingSsid) {
+        if (line.isEmpty()) {
+            Serial.println("ERR SSID cannot be empty - aborted");
+            wifiReceiveStep = WifiReceiveStep::None;
+            return;
+        }
+        pendingWifiSsid = line;
+        wifiReceiveStep = WifiReceiveStep::AwaitingPassword;
+        Serial.println("OK");
+        return;
+    }
+
+    // AwaitingPassword - line is the password (may legitimately be empty for
+    // an open network).
+    Preferences prefs;
+    prefs.begin("config", false);
+    prefs.putString("wifi-ssid", pendingWifiSsid);
+    prefs.putString("wifi-password", line);
+    prefs.end();
+
+    pendingWifiSsid = "";
+    wifiReceiveStep = WifiReceiveStep::None;
+    Serial.println("OK");
 }

@@ -18,6 +18,8 @@
 //                                                     client secret (masked with '*' at its
 //                                                     stored length, same convention as the
 //                                                     on-device web config page), the
+//                                                     currently-connected WiFi SSID (no
+//                                                     password - see SET_WIFI), the
 //                                                     scanline/infotext/triangle/coastline
 //                                                     display toggles, and the color palette
 //   SET_COLOR <KEY> <RRGGBB hex>                  -> "OK" / "ERR <reason>"
@@ -41,6 +43,20 @@
 //                                                     triangle, coastline (persisted; only
 //                                                     fully applies after RESTART, since these
 //                                                     are read once at boot)
+//   SET_WIFI                                      -> "OK" (now expects the SSID as the next line)
+//   <ssid>                                         -> "OK" (now expects the password as the next line)
+//   <password>                                     -> "OK"
+//                                                     (persisted; only fully applies after RESTART.
+//                                                     Split across three lines rather than
+//                                                     space-delimited arguments like every other
+//                                                     SET_* command, since SSIDs/passwords
+//                                                     routinely contain spaces - each line's
+//                                                     entire content, verbatim, becomes the SSID
+//                                                     or password, so nothing needs escaping.
+//                                                     Same "switch into a stateful multi-line
+//                                                     mode" shape as COASTLINE_BEGIN below, just
+//                                                     for exactly two lines instead of a batch of
+//                                                     points)
 //   COASTLINE_BEGIN <count> <lat> <lon> <radius>  -> "OK" / "ERR <reason>"
 //   <latMicro>,<lonMicro>                            (repeated `count` times - the device
 //                                                     sends "PROGRESS <n>" every
@@ -83,7 +99,17 @@ private:
     // coastline transfer - see the class comment above.
     static constexpr size_t COASTLINE_ACK_INTERVAL = 100;
 
+    // SET_WIFI transfer state - see the class comment above. Same stall-abandon
+    // reasoning as the coastline transfer, just a much shorter window since
+    // there are only ever two lines to wait for.
+    enum class WifiReceiveStep { None, AwaitingSsid, AwaitingPassword };
+    WifiReceiveStep wifiReceiveStep = WifiReceiveStep::None;
+    String pendingWifiSsid;
+    unsigned long lastWifiLineMs = 0;
+    static constexpr unsigned long WIFI_STALL_TIMEOUT_MS = 10000;
+
     void HandleLine(const String& line);
     void HandleCommand(const String& line);
     void HandleCoastlineDataLine(const String& line);
+    void HandleWifiDataLine(const String& line);
 };

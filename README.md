@@ -224,6 +224,7 @@ A Windows desktop app - [NZFunGi/micro-radar-companion](https://github.com/NZFun
 - Edit location and range (in km)
 - Regenerate the coastline overlay for any location/range by fetching real OpenStreetMap data, classifying land vs sea, and pushing it to the device - no firmware rebuild needed
 - Set the OpenSky API Client ID/Secret and the four display toggles (radar sweep, aircraft info, directional aircraft, coastline) - previously only settable via the device's own web config page; saving these restarts the device to apply them, since they're only read once at boot
+- Change the device's WiFi network/password over USB - no need to rebuild firmware or join the `MicroRadar-Setup` hotspot to switch networks; the device is always reachable over USB to fix a bad WiFi password even if it can't get online
 
 <p align="center">
   <img src="docs/companion-app-screenshot.png" alt="Companion app screenshot" width="420"/>
@@ -276,6 +277,11 @@ This appears to be a Windows-specific issue. Either of these should fix it:
 > The coastline overlay looks blank, or shows the wrong shape for my location
 
 The firmware only has one location's coastline data pre-baked in (see [Fork Features](#fork-features)). For anywhere else, use the [companion app](https://github.com/NZFunGi/micro-radar-companion)'s **Apply & Regenerate Coastline** button to fetch and push real data for your actual configured location and range.
+<br/><br/>
+
+> I need to change WiFi networks and don't want to go through the `MicroRadar-Setup` portal again
+
+Use the [companion app](https://github.com/NZFunGi/micro-radar-companion)'s **WiFi network** box instead - it sets new credentials over the same USB connection and restarts the device to apply them. If the new credentials turn out to be wrong, the device just won't have WiFi until fixed - reconnect the companion app over USB (which doesn't depend on WiFi at all) and try again.
 <br/><br/>
 
 > Route info (`O:` / `D:`) never shows up for some aircraft, just the flight number
