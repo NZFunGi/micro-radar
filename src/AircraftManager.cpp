@@ -145,6 +145,12 @@ void AircraftManager::DrawRadarCircles(LGFX_Sprite& backbuffer) const
     backbuffer.drawCircle(CENTRE, CENTRE, OUTER, radar);
     backbuffer.drawCircle(CENTRE, CENTRE, (OUTER / 3) * 2, ColorUtils::BlendToward(radar, sea, 0.55f));
     backbuffer.drawCircle(CENTRE, CENTRE, OUTER / 3, ColorUtils::BlendToward(radar, sea, 0.28f));
+
+    // N/S and E/W crosshair, same dimness as the middle ring so it reads as
+    // background structure rather than competing with aircraft/coastline.
+    const uint32_t crosshair = ColorUtils::BlendToward(radar, sea, 0.55f);
+    backbuffer.drawLine(CENTRE, CENTRE - OUTER, CENTRE, CENTRE + OUTER, crosshair);
+    backbuffer.drawLine(CENTRE - OUTER, CENTRE, CENTRE + OUTER, CENTRE, crosshair);
 }
 
 std::pair<int, int> AircraftManager::ProjectCoordinateToScreen(float predLat, float predLon) const
