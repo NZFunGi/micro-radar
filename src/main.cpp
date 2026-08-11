@@ -127,11 +127,12 @@ void loop()
 
   // Range label - drawn last so it always sits on top of the coastline,
   // scan lines, and aircraft rather than getting drawn over by any of them.
+  // Bottom-left quadrant, clear of the centred crosshair/rings.
   const double radiusDeg = configServer.GetStoredString("radius").toDouble();
   const String rangeLabel = "Range = " + String(radiusDeg * GeoUnits::KM_PER_DEGREE, 0) + "km";
   backbuffer.setTextSize(1);
   backbuffer.setTextColor(ColorConfig::Get(ColorConfig::RANGE_LABEL));
-  DrawBoldCentreString(backbuffer, rangeLabel, SCREEN_SIZE_DIV_2, 12);
+  DrawBoldString(backbuffer, rangeLabel, 8, SCREEN_SIZE - 20);
 
   backbuffer.pushSprite(0, 0);
 }
