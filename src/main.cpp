@@ -127,17 +127,14 @@ void loop()
 
   // Range label - drawn last so it always sits on top of the coastline,
   // scan lines, and aircraft rather than getting drawn over by any of them.
-  // Bottom-left quadrant, but the display itself is round (the radar rings
-  // already trace right to the screen's visible edge - see DrawRadarCircles's
-  // OUTER radius), so anywhere near a corner of the square framebuffer is
-  // physically off-screen. (25, 155) keeps every corner of this string's
-  // bounding box a healthy ~15px inside that circle rather than right at its
-  // edge, while still reading as clearly bottom-left rather than dead centre.
+  // Centred top - close enough to the screen's edge to need the margin
+  // check, but a short "90km"-style string comfortably clears the round
+  // display's visible circle here (see DrawRadarCircles's OUTER radius).
   const double radiusDeg = configServer.GetStoredString("radius").toDouble();
-  const String rangeLabel = "Range = " + String(radiusDeg * GeoUnits::KM_PER_DEGREE, 0) + "km";
+  const String rangeLabel = String(radiusDeg * GeoUnits::KM_PER_DEGREE, 0) + "km";
   backbuffer.setTextSize(1);
   backbuffer.setTextColor(ColorConfig::Get(ColorConfig::RANGE_LABEL));
-  DrawBoldString(backbuffer, rangeLabel, 25, 155);
+  DrawBoldCentreString(backbuffer, rangeLabel, SCREEN_SIZE_DIV_2, 12);
 
   backbuffer.pushSprite(0, 0);
 }
