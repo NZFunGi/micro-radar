@@ -59,7 +59,7 @@ void RouteLookupManager::Update()
     }
 
     if (result.statusCode == 404) {
-        cache[callsign] = RouteInfo{ true, false, "", "" };
+        CacheRoute(callsign, RouteInfo{ true, false, "", "" });
         Serial.print("[INFO] No route on file for ");
         Serial.println(callsign);
         return;
@@ -76,13 +76,13 @@ void RouteLookupManager::Update()
         return;
     }
 
-    cache[callsign] = ParseRouteResponse(result.response);
+    const RouteInfo resolved = ParseRouteResponse(result.response);
+    CacheRoute(callsign, resolved);
 
     // Everything else in this file only logs on failure, which makes "is
     // this actually working, just slowly (throttled + reset by reboots)?"
     // impossible to answer from the serial log alone - this line closes
     // that gap.
-    const RouteInfo& resolved = cache[callsign];
     Serial.print("[INFO] Route lookup for ");
     Serial.print(callsign);
     if (resolved.found) {
@@ -102,6 +102,23 @@ void RouteLookupManager::PruneQueueExcept(const std::set<String>& activeCallsign
         } else {
             ++it;
         }
+    }
+}
+
+void RouteLookupManager::CacheRoute(const String& callsign, const RouteInfo& info)
+{
+    // Overwriting an existing entry doesn't need a new cacheOrder entry (and
+    // shouldn't get one - that would let a callsign that keeps re-resolving
+    // dodge eviction forever) - RequestLookup already guards against
+    // re-queueing anything already in `cache`, so this is just defensive.
+    if (cache.find(callsign) == cache.end()) {
+        cacheOrder.push_back(callsign);
+    }
+    cache[callsign] = info;
+
+    while (cache.size() > MAX_CACHE_ENTRIES && !cacheOrder.empty()) {
+        cache.erase(cacheOrder.front());
+        cacheOrder.pop_front();
     }
 }
 

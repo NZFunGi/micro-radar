@@ -28,6 +28,16 @@ private:
     ConfigurationWebServer& configServer;
 
     std::map<String, RouteInfo> cache;
+    // Insertion order of `cache`'s keys, oldest first - lets CacheRoute() evict
+    // the oldest entry once the cache hits MAX_CACHE_ENTRIES. Without this,
+    // `cache` was a genuine unbounded leak: every distinct callsign ever seen
+    // stayed in it for the entire uptime, which is fine for an hour of testing
+    // but exhausts the ESP32's ~300KB heap after a day or two in a busy area -
+    // manifesting first as JSON parses starting to fail for lack of a
+    // contiguous allocation (aircraft silently disappearing from the states/all
+    // response), then a full lockup once the heap is critically fragmented.
+    std::deque<String> cacheOrder;
+    static constexpr size_t MAX_CACHE_ENTRIES = 300;
     std::deque<String> queue;
     std::set<String> queued;
 
@@ -35,6 +45,10 @@ private:
     unsigned long lastLookup = 0;
 
     RouteInfo ParseRouteResponse(const String& json) const;
+
+    // Inserts/overwrites callsign in `cache`, evicting the oldest entry first
+    // if this would exceed MAX_CACHE_ENTRIES - see the comment on `cacheOrder`.
+    void CacheRoute(const String& callsign, const RouteInfo& info);
 
 public:
     RouteLookupManager(ConfigurationWebServer& config, OpenSkyAuthTokenHandler& auth, HttpRequestManager& httpManager)
