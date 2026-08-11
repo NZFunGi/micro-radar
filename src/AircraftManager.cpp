@@ -173,11 +173,10 @@ void AircraftManager::DrawAircraftInfo(LGFX_Sprite& backbuffer, int x, int y, co
     backbuffer.drawString(trimmedCallsign, x + 5, y + 5);
 
     // No route data yet (still queued/throttled) or genuinely not found for
-    // this callsign - just show the flight number rather than a couple of
-    // "O: --" / "D: --" placeholder lines that add clutter without info.
+    // this callsign - just show the flight number rather than a placeholder
+    // line that adds clutter without info.
     if (haveRoute) {
-        backbuffer.drawString("O: " + route->origin, x + 5, y + 5 + lineHeight);
-        backbuffer.drawString("D: " + route->destination, x + 5, y + 5 + lineHeight * 2);
+        backbuffer.drawString(route->origin + " - " + route->destination, x + 5, y + 5 + lineHeight);
     }
 }
 
