@@ -140,6 +140,7 @@ void ConfigurationWebServer::Initialise() {
         Serial.println("[GET] Handling request to config web server...");
 
         // read all values up front so the processor lambda can capture by value
+        Preferences prefs;
         prefs.begin("config", true);
         const String latitude = prefs.getString("latitude", "");
         const String longitude = prefs.getString("longitude", "");
@@ -182,8 +183,11 @@ void ConfigurationWebServer::Initialise() {
     server.on("/save", HTTP_POST, [&](AsyncWebServerRequest* request) {
         Serial.println("[POST] Handling form submission to config web server...");
 
+        Preferences prefs;
+        prefs.begin("config", false);
+
         // safe parameter retrieval helper lambda
-        auto TrySaveParam = [request, this](const char* paramName) {
+        auto TrySaveParam = [request, &prefs](const char* paramName) {
             const auto* param = request->getParam(paramName, true);
             if (param == nullptr)
                 return false;
@@ -191,8 +195,6 @@ void ConfigurationWebServer::Initialise() {
             prefs.putString(paramName, param->value());
             return true;
             };
-
-        prefs.begin("config", false);
 
         TrySaveParam("latitude");
         TrySaveParam("longitude");
@@ -228,6 +230,7 @@ void ConfigurationWebServer::Initialise() {
 
 const String ConfigurationWebServer::GetStoredString(const char* key)
 {
+    Preferences prefs;
     prefs.begin("config", true);
     const String value = prefs.getString(key, "");
     prefs.end();
