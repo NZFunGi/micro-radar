@@ -3,6 +3,8 @@
 #include "EmbeddedAirportCodes.h"
 
 #include <ArduinoJson.h>
+#include <algorithm>
+#include <cstring>
 
 namespace {
     // hexdb.io's own documented limit is 1000 requests/5min - 400ms would be
@@ -17,6 +19,17 @@ namespace {
     // requests; costs a slower initial fill of route info after boot, not
     // a functional loss.
     constexpr unsigned long HEXDB_THROTTLE_MS = 2000;
+
+    // Bounds-safe copy into a fixed-size buffer - always null-terminates,
+    // silently truncates anything that doesn't fit (only ever expected for
+    // malformed/unexpected upstream data, since callsigns and airport codes
+    // are documented short - see RouteLookupManager.h).
+    void CopyToFixed(char* dest, size_t destSize, const String& src)
+    {
+        const size_t n = std::min(src.length(), destSize - 1);
+        memcpy(dest, src.c_str(), n);
+        dest[n] = '\0';
+    }
 }
 
 void RouteLookupManager::Initialise()
@@ -31,7 +44,12 @@ void RouteLookupManager::Initialise()
 void RouteLookupManager::RequestLookup(const String& trimmedCallsign)
 {
     if (trimmedCallsign.isEmpty()) return;
-    if (cache.find(trimmedCallsign) != cache.end()) return;
+    // Callsigns are documented as up to 8 chars (OpenSky's states/all spec) -
+    // cache.callsign only has room for that; silently ignore anything
+    // longer rather than risk a malformed/unexpected upstream value
+    // overflowing a fixed buffer.
+    if (trimmedCallsign.length() > 8) return;
+    if (FindCacheEntry(trimmedCallsign) != nullptr) return;
     if (queued.find(trimmedCallsign) != queued.end()) return;
     // Already past its hexdb.io attempt, waiting on the OpenSky fallback -
     // don't re-queue it into the fresh (hexdb.io-first) queue too.
@@ -135,7 +153,7 @@ void RouteLookupManager::AttemptOpenSky(const String& callsign)
     }
 
     if (result.statusCode == 404) {
-        CacheRoute(callsign, RouteInfo{ true, false, "", "" });
+        CacheRoute(callsign, RouteInfo{ true, false, {0}, {0} });
         Serial.print("[INFO] No route on file for ");
         Serial.println(callsign);
         return;
@@ -177,21 +195,37 @@ void RouteLookupManager::PruneQueueExcept(const std::set<String>& activeCallsign
     }
 }
 
+RouteLookupManager::CacheEntry* RouteLookupManager::FindCacheEntry(const String& callsign)
+{
+    for (auto& entry : cache) {
+        if (entry.used && strcmp(callsign.c_str(), entry.callsign) == 0) return &entry;
+    }
+    return nullptr;
+}
+
+const RouteLookupManager::CacheEntry* RouteLookupManager::FindCacheEntry(const String& callsign) const
+{
+    for (const auto& entry : cache) {
+        if (entry.used && strcmp(callsign.c_str(), entry.callsign) == 0) return &entry;
+    }
+    return nullptr;
+}
+
 void RouteLookupManager::CacheRoute(const String& callsign, const RouteInfo& info)
 {
-    // Overwriting an existing entry doesn't need a new cacheOrder entry (and
-    // shouldn't get one - that would let a callsign that keeps re-resolving
-    // dodge eviction forever) - RequestLookup already guards against
-    // re-queueing anything already in `cache`, so this is just defensive.
-    if (cache.find(callsign) == cache.end()) {
-        cacheOrder.push_back(callsign);
+    if (CacheEntry* existing = FindCacheEntry(callsign)) {
+        existing->info = info;
+        return;
     }
-    cache[callsign] = info;
 
-    while (cache.size() > MAX_CACHE_ENTRIES && !cacheOrder.empty()) {
-        cache.erase(cacheOrder.front());
-        cacheOrder.pop_front();
-    }
+    // New callsign - claim the next round-robin slot (silently overwriting
+    // whatever was cached there before, if the cache is already full - see
+    // the comment on `nextCacheSlot`).
+    CacheEntry& slot = cache[nextCacheSlot];
+    CopyToFixed(slot.callsign, sizeof(slot.callsign), callsign);
+    slot.used = true;
+    slot.info = info;
+    nextCacheSlot = (nextCacheSlot + 1) % MAX_CACHE_ENTRIES;
 }
 
 // hexdb.io's response here is plain text (e.g. "DUB-LHR"), not JSON -
@@ -208,13 +242,13 @@ RouteInfo RouteLookupManager::ParseHexdbRouteResponse(const String& text) const
     const int firstDash = route.indexOf('-');
     const int lastDash = route.lastIndexOf('-');
     if (route.isEmpty() || firstDash < 0)
-        return RouteInfo{ true, false, "", "" };
+        return RouteInfo{ true, false, {0}, {0} };
 
     RouteInfo info;
     info.resolved = true;
     info.found = true;
-    info.origin = route.substring(0, firstDash);
-    info.destination = route.substring(lastDash + 1);
+    CopyToFixed(info.origin, sizeof(info.origin), route.substring(0, firstDash));
+    CopyToFixed(info.destination, sizeof(info.destination), route.substring(lastDash + 1));
     return info;
 }
 
@@ -228,11 +262,11 @@ RouteInfo RouteLookupManager::ParseOpenSkyRouteResponse(const String& json) cons
 {
     JsonDocument doc;
     if (deserializeJson(doc, json) != DeserializationError::Ok)
-        return RouteInfo{ true, false, "", "" };
+        return RouteInfo{ true, false, {0}, {0} };
 
     JsonArray route = doc["route"];
     if (route.isNull() || route.size() == 0)
-        return RouteInfo{ true, false, "", "" };
+        return RouteInfo{ true, false, {0}, {0} };
 
     auto toIata = [](const String& icao) -> String {
         if (icao.length() != 4) return icao;
@@ -243,8 +277,8 @@ RouteInfo RouteLookupManager::ParseOpenSkyRouteResponse(const String& json) cons
     RouteInfo info;
     info.resolved = true;
     info.found = true;
-    info.origin = toIata(route[0].as<String>());
-    info.destination = toIata(route[route.size() - 1].as<String>());
+    CopyToFixed(info.origin, sizeof(info.origin), toIata(route[0].as<String>()));
+    CopyToFixed(info.destination, sizeof(info.destination), toIata(route[route.size() - 1].as<String>()));
     return info;
 }
 
@@ -265,7 +299,6 @@ void RouteLookupManager::LogRouteResult(const char* source, const String& callsi
 
 const RouteInfo* RouteLookupManager::GetRoute(const String& trimmedCallsign) const
 {
-    auto it = cache.find(trimmedCallsign);
-    if (it == cache.end()) return nullptr;
-    return &it->second;
+    const CacheEntry* entry = FindCacheEntry(trimmedCallsign);
+    return entry ? &entry->info : nullptr;
 }

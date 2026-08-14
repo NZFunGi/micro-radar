@@ -176,7 +176,7 @@ void AircraftManager::DrawAircraftInfo(LGFX_Sprite& backbuffer, int x, int y, co
     // this callsign - just show the flight number rather than a placeholder
     // line that adds clutter without info.
     if (haveRoute) {
-        backbuffer.drawString(route->origin + " - " + route->destination, x + 5, y + 5 + lineHeight);
+        backbuffer.drawString(String(route->origin) + " - " + route->destination, x + 5, y + 5 + lineHeight);
     }
 }
 
