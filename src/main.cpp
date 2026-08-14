@@ -39,6 +39,18 @@ AircraftManager aircraftManager(configServer, authHandler, http, tft, routeManag
 CoastlineManager coastlineManager(configServer);
 SerialCommandManager serialCommands(coastlineManager);
 
+// Cached at boot rather than read from Preferences/NVS on every single
+// render frame (loop() has no frame limiter, so that was tens of flash
+// reads + String allocations per second, every second, for the device's
+// entire uptime). Safe to cache: every way either of these can actually
+// change (SET_TOGGLE/SET_LOCATION over serial, or the web config page's
+// POST /save) either explicitly restarts the device itself or is always
+// followed by a RESTART as part of the established protocol - see
+// SerialCommandManager.h's command list - so a stale in-memory copy
+// between boots was never actually possible to begin with.
+bool cachedScanlineEnabled = true;
+double cachedRadiusDeg = 0.2;
+
 void setup()
 {
   // Must be called before Serial.begin() to take effect. The default (256
@@ -96,6 +108,12 @@ void setup()
 
   // fetch + rasterize coastline for the configured location (one-time, shows its own loading message)
   coastlineManager.Initialise(tft);
+
+  // see the comment on these globals' declaration for why this is safe to
+  // read once here rather than every loop() frame
+  const String scanlineStored = configServer.GetStoredString("scanline");
+  cachedScanlineEnabled = scanlineStored.isEmpty() || scanlineStored == "true";
+  cachedRadiusDeg = configServer.GetStoredString("radius").toDouble();
 }
 
 void loop()
@@ -110,8 +128,7 @@ void loop()
 
   coastlineManager.Draw(backbuffer);
 
-  String renderScanlines = configServer.GetStoredString("scanline");
-  if (renderScanlines.isEmpty() || renderScanlines == "true") {
+  if (cachedScanlineEnabled) {
     DrawScanLines(backbuffer,
       SCREEN_SIZE_DIV_2 - 1,
       SCREEN_SIZE_DIV_2 - 1,
@@ -130,8 +147,7 @@ void loop()
   // Centred top - close enough to the screen's edge to need the margin
   // check, but a short "90km"-style string comfortably clears the round
   // display's visible circle here (see DrawRadarCircles's OUTER radius).
-  const double radiusDeg = configServer.GetStoredString("radius").toDouble();
-  const String rangeLabel = String(radiusDeg * GeoUnits::KM_PER_DEGREE, 0) + "km";
+  const String rangeLabel = String(cachedRadiusDeg * GeoUnits::KM_PER_DEGREE, 0) + "km";
   backbuffer.setTextSize(1);
   backbuffer.setTextColor(ColorConfig::Get(ColorConfig::RANGE_LABEL));
   DrawBoldCentreString(backbuffer, rangeLabel, SCREEN_SIZE_DIV_2, 12);
